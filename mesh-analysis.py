@@ -1,3 +1,4 @@
+
 import time
 import numpy as np
 
@@ -10,114 +11,114 @@ from OpenGL.GLUT import *
 #   LOW-LEVEL PHYSICS
 # =========================
 
-class MassPoint:
+class MP:
     """
     Single mass node of the fabric.
     Stores position, previous position (for Verlet), velocity and forces.
     """
 
     def __init__(self, x, y, z, mass=1.0):
-        self.pos = np.array([x, y, z], dtype=float)
-        self.prev_pos = np.array([x, y, z], dtype=float)
+        self.p = np.array([x, y, z], dtype=float)
+        self.pp = np.array([x, y, z], dtype=float)
 
         # These are mostly for debugging / future tweaks
-        self.vel = np.zeros(3, dtype=float)
-        self.force = np.zeros(3, dtype=float)
+        self.v = np.zeros(3, dtype=float)
+        self.f = np.zeros(3, dtype=float)
 
         self.mass = float(mass)
-        self.locked = False      # pinned in space
-        self.removed = False     # if we ever want to disable a point
+        self.lk = False      # pinned in space
+        self.rm = False     # if we ever want to disable a point
 
-    def add_force(self, f):
-        """Accumulate an external force (gravity, wind, etc.)."""
-        if not self.locked and not self.removed:
-            self.force += f
+    def af(self, f):
+        """Accumulate an external f (g, wind, etc.)."""
+        if not self.lk and not self.rm:
+            self.f += f
 
-    def integrate(self, dt, damping=0.98):
+    def upd(self, dt, dp=0.98):
         """
-        Verlet integration step.
+        Verlet integration st.
 
-        x_new = x + (x - x_prev) * damping + a * dt^2
+        x_new = x + (x - x_prev) * dp + a * dt^2
         """
-        if self.locked or self.removed:
-            # Clear forces so they don't explode when re-enabled
-            self.force[:] = 0.0
+        if self.lk or self.rm:
+            # Clear forces so they don't explode when re-en
+            self.f[:] = 0.0
             return
 
-        accel = self.force / self.mass
-        next_pos = self.pos + (self.pos - self.prev_pos) * damping + accel * (dt * dt)
+        accel = self.f / self.mass
+        next_pos = self.p + (self.p - self.pp) * dp + accel * (dt * dt)
 
-        self.prev_pos = self.pos.copy()
-        self.pos = next_pos
+        self.pp = self.p.copy()
+        self.p = next_pos
 
         # Approximate velocity (not needed for sim, but useful to have)
-        self.vel = (self.pos - self.prev_pos) / max(dt, 1e-6)
+        self.v = (self.p - self.pp) / max(dt, 1e-6)
 
         # Clear forces for next frame
-        self.force[:] = 0.0
+        self.f[:] = 0.0
 
 
-class SpringLink:
+class SL:
     """
-    Distance constraint between two MassPoint objects.
+    Distance constraint between two MP objects.
     Acts like a simple spring that tries to keep a rest length.
     """
 
-    def __init__(self, a: MassPoint, b: MassPoint, stiffness=0.99):
+    def __init__(self, a: MP, b: MP, stiffness=0.99):
         self.a = a
         self.b = b
-        self.rest_len = np.linalg.norm(a.pos - b.pos)
+        self.rl = np.linalg.norm(a.p - b.p)
         self.stiffness = float(stiffness)
-        self.enabled = True
+        self.en = True
 
     def project(self):
         """
         Enforce the distance constraint between a and b.
-        Uses a simple position correction step.
+        Uses a simple position correction st.
         """
-        if not self.enabled:
+        if not self.en:
             return
 
-        if (self.a.removed or self.b.removed) or (self.a.locked and self.b.locked):
+        if (self.a.rm or self.b.rm) or (self.a.lk and self.b.lk):
             return
 
-        delta = self.b.pos - self.a.pos
+        delta = self.b.p - self.a.p
         dist = np.linalg.norm(delta)
 
         if dist < 1e-5:
             return
 
         # How much it's stretched / compressed
-        stretch = (dist - self.rest_len) / dist
+        stretch = (dist - self.rl) / dist
         corr = delta * stretch * self.stiffness
 
-        if not self.a.locked and not self.b.locked:
-            self.a.pos += 0.5 * corr
-            self.b.pos -= 0.5 * corr
-        elif self.a.locked:
-            self.b.pos -= corr
-        elif self.b.locked:
-            self.a.pos += corr
+        if not self.a.lk and not self.b.lk:
+            self.a.p += 0.5 * corr
+            self.b.p -= 0.5 * corr
+        elif self.a.lk:
+            self.b.p -= corr
+        elif self.b.lk:
+            self.a.p += corr
 
 
-class ClothFace:
+class CF:
     """
     Triangle used for rendering the fabric surface
     and for hit-testing cuts.
     """
 
-    def __init__(self, p0: MassPoint, p1: MassPoint, p2: MassPoint):
+    def __init__(self, p0: MP, p1: MP, p2: MP):
         self.nodes = [p0, p1, p2]
-        self.visible = True
+        self.vs = True
 
-    def surface_normal(self):
+    def sn(self):
         """Compute normal using cross product of triangle edges."""
-        if not self.visible:
+        if not self.vs:
             return np.array([0.0, 0.0, 1.0], dtype=float)
 
-        v0 = self.nodes[0].pos
-        v1 = self.nodes[1].pos
-        v2 = self.nodes[2].pos
+        v0 = self.nodes[0].p
+        v1 = self.nodes[1].p
+        v2 = self.nodes[2].p
 
         e1 = v1 - v0
         e2 = v2 - v0
@@ -159,10 +160,10 @@ class ClothFace:
           2. project everything to XY
           3. test against edges + interior
         """
-        if not self.visible:
+        if not self.vs:
             return False, None
 
-        v0, v1, v2 = [n.pos for n in self.nodes]
+        v0, v1, v2 = [n.p for n in self.nodes]
 
         # Layer check in Z so we don't cut far layers accidentally
         tri_z = (v0[2] + v1[2] + v2[2]) / 3.0
@@ -196,31 +197,31 @@ class ClothFace:
 #   FABRIC SYSTEM
 # =========================
 
-class FabricSystem:
+class FS:
     """
     Manages the entire cloth: points, springs, faces and cutting.
     """
 
     def __init__(self,
-                 cols=20,
-                 rows=20,
-                 spacing=0.1,
-                 layer_count=2,
-                 layer_gap=0.05):
+                 c=20,
+                 r=20,
+                 sp=0.1,
+                 lc=2,
+                 lg=0.05):
 
-        self.cols = int(cols)
-        self.rows = int(rows)
-        self.spacing = float(spacing)
-        self.layer_count = int(layer_count)
-        self.layer_gap = float(layer_gap)
+        self.c = int(c)
+        self.r = int(r)
+        self.sp = float(sp)
+        self.lc = int(lc)
+        self.lg = float(lg)
 
         self.points = []
         self.springs = []
         self.faces = []
 
-        self.gravity = np.array([0.0, -9.81, 0.0], dtype=float)
-        self.damping = 0.98
-        self.relax_loops = 5
+        self.g = np.array([0.0, -9.81, 0.0], dtype=float)
+        self.dp = 0.98
+        self.rl = 5
 
         self._build_mesh()
 
@@ -228,28 +229,28 @@ class FabricSystem:
 
     def _build_mesh(self):
         """Create grid of points, springs, and faces for all layers."""
-        print(f"Creating fabric grid: {self.cols}x{self.rows}, layers={self.layer_count}")
+        print(f"Creating fabric grid: {self.c}x{self.r}, layers={self.lc}")
 
         # Reference grid for each layer: [layer][row][col]
         grid = []
 
-        for layer_idx in range(self.layer_count):
-            z_offset = layer_idx * self.layer_gap
+        for layer_idx in range(self.lc):
+            z_offset = layer_idx * self.lg
             layer_grid = []
 
-            for r in range(self.rows + 1):
+            for r in range(self.r + 1):
                 row_nodes = []
-                for c in range(self.cols + 1):
+                for c in range(self.c + 1):
                     # Center the cloth around origin
-                    x = (c - self.cols / 2.0) * self.spacing
-                    y = (self.rows / 2.0 - r) * self.spacing
+                    x = (c - self.c / 2.0) * self.sp
+                    y = (self.r / 2.0 - r) * self.sp
                     z = z_offset
 
-                    node = MassPoint(x, y, z)
+                    node = MP(x, y, z)
 
                     # Only pin top corners of the first (front) layer
-                    if layer_idx == 0 and r == 0 and (c == 0 or c == self.cols):
-                        node.locked = True
+                    if layer_idx == 0 and r == 0 and (c == 0 or c == self.c):
+                        node.lk = True
 
                     self.points.append(node)
                     row_nodes.append(node)
@@ -257,91 +258,91 @@ class FabricSystem:
             grid.append(layer_grid)
 
         # Create structural & diagonal springs in each layer
-        for layer_idx in range(self.layer_count):
+        for layer_idx in range(self.lc):
             layer_grid = grid[layer_idx]
-            for r in range(self.rows + 1):
-                for c in range(self.cols + 1):
+            for r in range(self.r + 1):
+                for c in range(self.c + 1):
                     p = layer_grid[r][c]
 
                     # horizontal
-                    if c < self.cols:
-                        self.springs.append(SpringLink(p, layer_grid[r][c + 1]))
+                    if c < self.c:
+                        self.springs.append(SL(p, layer_grid[r][c + 1]))
 
                     # vertical
-                    if r < self.rows:
-                        self.springs.append(SpringLink(p, layer_grid[r + 1][c]))
+                    if r < self.r:
+                        self.springs.append(SL(p, layer_grid[r + 1][c]))
 
                     # diagonals
-                    if r < self.rows and c < self.cols:
-                        self.springs.append(SpringLink(p, layer_grid[r + 1][c + 1]))
-                        self.springs.append(SpringLink(layer_grid[r][c + 1],
+                    if r < self.r and c < self.c:
+                        self.springs.append(SL(p, layer_grid[r + 1][c + 1]))
+                        self.springs.append(SL(layer_grid[r][c + 1],
                                                        layer_grid[r + 1][c]))
 
         # Connect layers vertically (same (r,c) across layers)
-        if self.layer_count > 1:
-            for layer_idx in range(self.layer_count - 1):
+        if self.lc > 1:
+            for layer_idx in range(self.lc - 1):
                 upper = grid[layer_idx]
                 lower = grid[layer_idx + 1]
-                for r in range(self.rows + 1):
-                    for c in range(self.cols + 1):
-                        self.springs.append(SpringLink(upper[r][c], lower[r][c], stiffness=0.99))
+                for r in range(self.r + 1):
+                    for c in range(self.c + 1):
+                        self.springs.append(SL(upper[r][c], lower[r][c], stiffness=0.99))
 
         # Build triangle faces for each cell in each layer
-        for layer_idx in range(self.layer_count):
+        for layer_idx in range(self.lc):
             layer_grid = grid[layer_idx]
-            for r in range(self.rows):
-                for c in range(self.cols):
+            for r in range(self.r):
+                for c in range(self.c):
                     p00 = layer_grid[r][c]
                     p10 = layer_grid[r][c + 1]
                     p01 = layer_grid[r + 1][c]
                     p11 = layer_grid[r + 1][c + 1]
 
                     # Two triangles per quad
-                    self.faces.append(ClothFace(p00, p10, p01))
-                    self.faces.append(ClothFace(p10, p11, p01))
+                    self.faces.append(CF(p00, p10, p01))
+                    self.faces.append(CF(p10, p11, p01))
 
         print(f"Fabric created: {len(self.points)} points, {len(self.springs)} springs, {len(self.faces)} faces")
 
     # ------- Simulation -------
 
-    def step(self, dt):
+    def st(self, dt):
         """Advance physics by dt seconds."""
-        # 1) Add gravity
+        # 1) Add g
         for p in self.points:
-            if not p.locked:
-                p.add_force(self.gravity * p.mass)
+            if not p.lk:
+                p.af(self.g * p.mass)
 
         # 2) Integrate all points
         for p in self.points:
-            p.integrate(dt, self.damping)
+            p.upd(dt, self.dp)
 
         # 3) Relax springs (project constraints)
-        for _ in range(self.relax_loops):
+        for _ in range(self.rl):
             for s in self.springs:
                 s.project()
 
         # 4) Extra stretch clamp (prevent crazy explosions)
         for s in self.springs:
-            if not s.enabled:
+            if not s.en:
                 continue
 
-            diff = s.b.pos - s.a.pos
+            diff = s.b.p - s.a.p
             dist = np.linalg.norm(diff)
             if dist < 1e-6:
                 continue
 
-            max_len = 1.5 * s.rest_len
+            max_len = 1.5 * s.rl
             if dist > max_len:
                 # Pull them closer together
                 excess = dist - max_len
                 corr = diff * (excess / dist)
-                if not s.a.locked and not s.b.locked:
-                    s.a.pos += 0.5 * corr
-                    s.b.pos -= 0.5 * corr
-                elif s.a.locked:
-                    s.b.pos -= corr
-                elif s.b.locked:
-                    s.a.pos += corr
+                if not s.a.lk and not s.b.lk:
+                    s.a.p += 0.5 * corr
+                    s.b.p -= 0.5 * corr
+                elif s.a.lk:
+                    s.b.p -= corr
+                elif s.b.lk:
+                    s.a.p += corr
 
     # ------- Cutting -------
 
@@ -351,7 +352,7 @@ class FabricSystem:
             return (r[1] - p[1]) * (q[0] - p[0]) > (q[1] - p[1]) * (r[0] - p[0])
         return (ccw(a0, b0, b1) != ccw(a1, b0, b1)) and (ccw(a0, a1, b0) != ccw(a0, a1, b1))
 
-    def cut_with_segment(self, start_world, end_world):
+    def cut(self, start_world, end_world):
         """
         Cut the cloth along a 3D segment.
         Deactivates intersected faces and disables springs that cross the segment.
@@ -365,9 +366,9 @@ class FabricSystem:
         for f in self.faces:
             hit, _ = f.intersects_segment(start_world, end_world)
             if hit:
-                if f.visible:
+                if f.vs:
                     cut_faces += 1
-                f.visible = False
+                f.vs = False
                 for p in f.nodes:
                     touched_points.add(p)
 
@@ -376,14 +377,14 @@ class FabricSystem:
         s1 = end_world[:2]
 
         for s in self.springs:
-            if not s.enabled:
+            if not s.en:
                 continue
 
-            a2 = s.a.pos[:2]
-            b2 = s.b.pos[:2]
+            a2 = s.a.p[:2]
+            b2 = s.b.p[:2]
 
             if self._segments_intersect_2d(a2, b2, s0, s1):
-                s.enabled = False
+                s.en = False
 
         print(f"Cut completed: {cut_faces} faces hidden, {len(touched_points)} points affected.")
         return cut_faces > 0
@@ -393,9 +394,9 @@ class FabricSystem:
 #   OPENGL VIEWER
 # =========================
 
-class FabricViewer:
+class FV:
     """
-    GLUT-based viewer for interacting with the FabricSystem.
+    GLUT-based viewer for interacting with the FS.
     Left drag = draw cut line
     Right drag = orbit camera
     Keys: SPACE = horizontal cut, 'c' = random cut, 'r' = reset.
@@ -404,26 +405,26 @@ class FabricViewer:
     def __init__(self):
         # Simulation
         self.fabric = None
-        self.last_time = time.time()
+        self.lt = time.time()
 
         # Camera
-        self.cam_pitch = 25.0
-        self.cam_yaw = -20.0
-        self.cam_dist = 12.0
+        self.cp = 25.0
+        self.cy = -20.0
+        self.cd = 12.0
 
         # Mouse
-        self._last_mouse_x = 0
-        self._last_mouse_y = 0
-        self._active_button = None
+        self._lmx = 0
+        self._lmy = 0
+        self._ab = None
 
         # Cutting line
-        self._cut_start = None
-        self._cut_end = None
-        self._drawing_cut = False
+        self._cs = None
+        self._ce = None
+        self._dcf = False
 
     # ------- GL Setup & Callbacks -------
 
-    def _init_gl(self):
+    def _ig(self):
         """Initial GL state + create fabric."""
         glClearColor(0.1, 0.4, 0.65, 1.0)
         glEnable(GL_DEPTH_TEST)
@@ -440,29 +441,29 @@ class FabricViewer:
         glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.9, 0.9, 0.9, 1.0])
 
         # Slightly more "silky" color
-        self.fabric = FabricSystem(cols=15, rows=15, spacing=0.5, layer_count=2, layer_gap=0.05)
+        self.fabric = FS(c=15, r=15, sp=0.5, lc=2, lg=0.05)
 
-    def _display(self):
+    def _ds(self):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
 
         # Camera transform
-        gluLookAt(0.0, 0.0, self.cam_dist,
+        gluLookAt(0.0, 0.0, self.cd,
                   0.0, 0.0, 0.0,
                   0.0, 1.0, 0.0)
-        glRotatef(self.cam_pitch, 1, 0, 0)
-        glRotatef(self.cam_yaw, 0, 1, 0)
+        glRotatef(self.cp, 1, 0, 0)
+        glRotatef(self.cy, 0, 1, 0)
 
         # Draw fabric
-        self._draw_fabric()
+        self._df()
 
         # Draw cut preview
-        if self._cut_start is not None and self._cut_end is not None:
-            self._draw_cut_preview()
+        if self._cs is not None and self._ce is not None:
+            self._dc()
 
         glutSwapBuffers()
 
-    def _draw_fabric(self):
+    def _df(self):
         """Draw faces + edge springs."""
         # Filled surface
         glEnable(GL_LIGHTING)
@@ -470,12 +471,12 @@ class FabricViewer:
 
         glBegin(GL_TRIANGLES)
         for face in self.fabric.faces:
-            if not face.visible:
+            if not face.vs:
                 continue
-            n = face.surface_normal()
+            n = face.sn()
             glNormal3fv(n)
             for p in face.nodes:
-                glVertex3fv(p.pos)
+                glVertex3fv(p.p)
         glEnd()
 
         # Wireframe overlay
@@ -485,40 +486,40 @@ class FabricViewer:
 
         glBegin(GL_LINES)
         for s in self.fabric.springs:
-            if not s.enabled:
+            if not s.en:
                 continue
-            glVertex3fv(s.a.pos)
-            glVertex3fv(s.b.pos)
+            glVertex3fv(s.a.p)
+            glVertex3fv(s.b.p)
         glEnd()
 
         glEnable(GL_LIGHTING)
 
-    def _draw_cut_preview(self):
+    def _dc(self):
         glDisable(GL_LIGHTING)
         glLineWidth(3.0)
         glColor3f(1.0, 0.3, 0.87)
 
         glBegin(GL_LINES)
-        glVertex3fv(self._cut_start)
-        glVertex3fv(self._cut_end)
+        glVertex3fv(self._cs)
+        glVertex3fv(self._ce)
         glEnd()
 
         glEnable(GL_LIGHTING)
 
-    def _idle(self):
+    def _id(self):
         """Physics tick + redraw."""
         now = time.time()
-        dt = now - self.last_time
+        dt = now - self.lt
         # Limit dt so simulation stays stable if window stalls
         dt = min(dt, 0.016)
-        self.last_time = now
+        self.lt = now
 
         if self.fabric is not None:
-            self.fabric.step(dt)
+            self.fabric.st(dt)
 
         glutPostRedisplay()
 
-    def _reshape(self, w, h):
+    def _rp(self, w, h):
         if h == 0:
             h = 1
         glViewport(0, 0, w, h)
@@ -529,54 +530,54 @@ class FabricViewer:
 
     # ------- Input -------
 
-    def _keyboard(self, key, x, y):
+    def _kb(self, key, x, y):
         if key in (b'q', b'\x1b'):
             glutLeaveMainLoop()
         elif key == b'c':
-            self._random_cut()
+            self._rc()
         elif key == b'r':
-            self.fabric = FabricSystem(cols=15, rows=15, spacing=0.15, layer_count=2)
+            self.fabric = FS(c=15, r=15, sp=0.15, lc=2)
             print("Fabric reset.")
         elif key == b' ':
-            self._horizontal_cut()
+            self._hc()
 
-    def _mouse(self, button, state, x, y):
-        self._last_mouse_x = x
-        self._last_mouse_y = y
+    def _ms(self, button, state, x, y):
+        self._lmx = x
+        self._lmy = y
 
         if button == GLUT_LEFT_BUTTON:
             if state == GLUT_DOWN:
-                self._active_button = GLUT_LEFT_BUTTON
-                self._drawing_cut = True
-                self._cut_start = self._screen_to_world(x, y)
-                self._cut_end = self._cut_start.copy()
+                self._ab = GLUT_LEFT_BUTTON
+                self._dcf = True
+                self._cs = self._screen_to_world(x, y)
+                self._ce = self._cs.copy()
             else:
                 # Finish cut
-                if self._drawing_cut and self._cut_start is not None and self._cut_end is not None:
-                    self.fabric.cut_with_segment(self._cut_start, self._cut_end)
-                self._drawing_cut = False
-                self._active_button = None
+                if self._dcf and self._cs is not None and self._ce is not None:
+                    self.fabric.cut(self._cs, self._ce)
+                self._dcf = False
+                self._ab = None
 
         elif button == GLUT_RIGHT_BUTTON:
             if state == GLUT_DOWN:
-                self._active_button = GLUT_RIGHT_BUTTON
+                self._ab = GLUT_RIGHT_BUTTON
             else:
-                self._active_button = None
+                self._ab = None
 
-    def _motion(self, x, y):
-        dx = x - self._last_mouse_x
-        dy = y - self._last_mouse_y
+    def _mt(self, x, y):
+        dx = x - self._lmx
+        dy = y - self._lmy
 
-        if self._active_button == GLUT_RIGHT_BUTTON:
+        if self._ab == GLUT_RIGHT_BUTTON:
             # Orbit camera
-            self.cam_yaw += dx * 0.4
-            self.cam_pitch += dy * 0.4
-        elif self._drawing_cut:
+            self.cy += dx * 0.4
+            self.cp += dy * 0.4
+        elif self._dcf:
             # Update cut line
-            self._cut_end = self._screen_to_world(x, y)
+            self._ce = self._screen_to_world(x, y)
 
-        self._last_mouse_x = x
-        self._last_mouse_y = y
+        self._lmx = x
+        self._lmy = y
 
     # ------- Helpers -------
 
@@ -601,7 +602,7 @@ class FabricViewer:
 
         return np.array([world_x, world_y, world_z], dtype=float)
 
-    def _random_cut(self):
+    def _rc(self):
         """Cut with a random short segment through the cloth."""
         s = np.array([
             np.random.uniform(-1.5, 1.5),
@@ -614,32 +615,32 @@ class FabricViewer:
             0.025
         ], dtype=float)
 
-        self.fabric.cut_with_segment(s, e)
+        self.fabric.cut(s, e)
         print("Random cut executed.")
 
-    def _horizontal_cut(self):
+    def _hc(self):
         """Straight horizontal cut across center."""
         s = np.array([-2.0, 0.0, 0.025], dtype=float)
         e = np.array([2.0, 0.0, 0.025], dtype=float)
-        self.fabric.cut_with_segment(s, e)
+        self.fabric.cut(s, e)
         print("Middle horizontal cut executed.")
 
     # ------- Entry point -------
 
-    def run(self):
+    def start(self):
         glutInit()
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
         glutInitWindowSize(800, 600)
-        glutCreateWindow(b"Fabric Cutter - Cloth Simulation")
+        glutCreateWindow(b"3D Mesh Simulation - Final Version")
 
-        self._init_gl()
+        self._ig()
 
-        glutDisplayFunc(self._display)
-        glutReshapeFunc(self._reshape)
-        glutKeyboardFunc(self._keyboard)
-        glutMouseFunc(self._mouse)
-        glutMotionFunc(self._motion)
-        glutIdleFunc(self._idle)
+        glutDisplayFunc(self._ds)
+        glutReshapeFunc(self._rp)
+        glutKeyboardFunc(self._kb)
+        glutMouseFunc(self._ms)
+        glutMotionFunc(self._mt)
+        glutIdleFunc(self._id)
 
         print("\n=== CONTROLS ===")
         print("Left Mouse  : drag to draw a cut line")
@@ -654,5 +655,5 @@ class FabricViewer:
 
 
 if __name__ == "__main__":
-    viewer = FabricViewer()
-    viewer.run()
+    viewer = FV()
+    viewer.start()
