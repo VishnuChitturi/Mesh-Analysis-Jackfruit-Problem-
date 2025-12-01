@@ -3,7 +3,7 @@
 This project is an **interactive real-time cloth simulation** using **Verlet integration physics** and **OpenGL rendering**.  
 Users can **cut the fabric using mouse drawing**, apply **random/horizontal cuts**, and **orbit around the cloth in 3D**.
 
-🎯 **Built using Python, NumPy, and PyOpenGL.**
+ **Built using Python, NumPy, and PyOpenGL.**
 
 ---
 
@@ -36,7 +36,7 @@ python3 mesh-analysis.py
 
 ---
 
-## ⚙️ Installation & Setup
+##  Installation & Setup
 
 ### 1️⃣ Install Python dependencies
 ```bash
@@ -55,7 +55,7 @@ brew install freeglut
 ```
 python cloth_simulation.py
 
-📁 Project Structure
+Project Structure
 cloth-simulation/
 │── cloth_simulation.py   # Main simulation code
 │── README.md             # This file
