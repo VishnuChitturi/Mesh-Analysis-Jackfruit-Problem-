@@ -1,4 +1,4 @@
-# 🧵 3D Cloth Simulation & Cutting – OpenGL + Python
+#  3D Cloth Simulation & Cutting – OpenGL + Python
 
 This project is an **interactive real-time cloth simulation** using **Verlet integration physics** and **OpenGL rendering**.  
 Users can **cut the fabric using mouse drawing**, apply **random/horizontal cuts**, and **orbit around the cloth in 3D**.
@@ -7,7 +7,7 @@ Users can **cut the fabric using mouse drawing**, apply **random/horizontal cuts
 
 ---
 
-## 🚀 Features
+##  Features
 
 ✔️ Real-time cloth simulation using physics  
 ✔️ Mouse-based cutting interaction  
@@ -23,7 +23,7 @@ python3 mesh-analysis.py
 
 ---
 
-## 🎮 Controls
+##  Controls
 
 | Key / Mouse     | Action |
 |----------------|--------|
@@ -50,8 +50,9 @@ sudo apt-get install freeglut3-dev
 Mac:
 brew install freeglut
 
-
-2️⃣ Run the simulation
+```
+### 2️⃣ Run the simulation
+```
 python cloth_simulation.py
 
 📁 Project Structure
